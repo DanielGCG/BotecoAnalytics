@@ -22,22 +22,22 @@ services:
     restart: always
     ports:
       - "3002:3002"
-    volumes:
-      - .:/app
-      - /app/node_modules
+    # volumes:
+    #   - .:/app
+    #   - /app/node_modules
     environment:
-      - DB_HOST=db
-      - DB_NAME=botecoanalytics
-      - DB_USER=root
-      - DB_PASS=root
+      - DB_HOST=${DB_HOST}
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASS=${DB_PASS}
       - DB_HOST_TECO=${DB_HOST_TECO}
       - DB_NAME_TECO=${DB_NAME_TECO}
       - DB_USER_TECO=${DB_USER_TECO}
       - DB_PASS_TECO=${DB_PASS_TECO}
-      - PORT=3002
-      # Adicione suas chaves do LastFM aqui ou em um arquivo .env separado
+      - PORT=${PORT}
       - LASTFM_API_KEY=${LASTFM_API_KEY}
-      - LASTFM_SECRET=${LASTFM_API_SECRET}
+      - LASTFM_API_SECRET=${LASTFM_API_SECRET}
+      - FRIENDS_LASTFM_USERS=${FRIENDS_LASTFM_USERS}
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
