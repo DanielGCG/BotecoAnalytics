@@ -1,0 +1,239 @@
+<%- contentFor('head') %>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<%- contentFor('body') %>
+
+    <nav class="bg-gray-800 p-4 mb-8 shadow-md flex justify-between items-center px-8">
+        <div class="flex items-center gap-4">
+            <a href="/" class="hover:opacity-80 transition-opacity">
+                <img src="/BotecoAnalytics.webp" alt="Boteco Analytics" class="h-12 w-auto object-contain bg-white rounded">
+            </a>
+            <div class="flex flex-col leading-tight border-l border-gray-600 pl-4">
+                <span class="text-xs uppercase tracking-widest text-gray-400 font-bold">Módulo</span>
+                <h1 class="text-lg font-bold text-blue-500 flex items-center gap-2">
+                    <i data-lucide="music" class="w-4 h-4"></i> Boteco Scrobble
+                </h1>
+            </div>
+        </div>
+        <form class="flex gap-4 items-center bg-gray-700 p-2 rounded-lg" action="/scrobble" method="GET">
+            <select name="user" class="bg-gray-800 text-sm p-1 rounded border border-gray-600">
+                <option value="group" <%= filterUser === 'group' ? 'selected' : '' %>>Grupo Inteiro</option>
+                <% friends.forEach(f => { %>
+                    <option value="<%= f %>" <%= filterUser === f ? 'selected' : '' %>><%= f %></option>
+                <% }) %>
+            </select>
+            <select name="period" class="bg-gray-800 text-sm p-1 rounded border border-gray-600">
+                <option value="7day" <%= period === '7day' ? 'selected' : '' %>>Semana</option>
+                <option value="1month" <%= period === '1month' ? 'selected' : '' %>>Mês</option>
+                <option value="6month" <%= period === '6month' ? 'selected' : '' %>>Semestre</option>
+                <option value="12month" <%= period === '12month' ? 'selected' : '' %>>Ano</option>
+                <option value="overall" <%= period === 'overall' ? 'selected' : '' %>>Tudo</option>
+            </select>
+            <button type="submit" class="bg-blue-600 hover:bg-blue-700 px-4 py-1 rounded text-sm font-bold transition">Filtrar</button>
+        </form>
+    </nav>
+
+    <div class="container mx-auto px-6 max-w-7xl">
+        
+        <div id="dbStatsContainer" class="mb-8 grid grid-cols-2 md:grid-cols-5 gap-4">
+            <!-- Status serão injetados aqui -->
+        </div>
+        
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8 h-[400px]">
+            <div class="bg-gray-800 p-6 rounded-lg shadow min-h-0">
+                <h2 class="text-xl font-semibold mb-4 text-blue-400 flex items-center gap-2">
+                    <i data-lucide="mic"></i> Artistas Mais Ouvidos
+                </h2>
+                <div class="relative h-64">
+                    <canvas id="artistsChart"></canvas>
+                </div>
+            </div>
+            <div class="bg-gray-800 p-6 rounded-lg shadow min-h-0">
+                <h2 class="text-xl font-semibold mb-4 text-purple-400 flex items-center gap-2">
+                    <i data-lucide="tag"></i> Gêneros (Estilos)
+                </h2>
+                <div class="relative h-64">
+                    <canvas id="tagsChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 mb-8">
+            <div class="bg-gray-800 p-6 rounded-lg shadow">
+                <h2 class="text-xl font-semibold mb-4 text-yellow-400 flex items-center gap-2">
+                    <i data-lucide="trending-up"></i> Histórico Temporal de Scrobbles
+                </h2>
+                <div class="relative h-[450px]">
+                    <canvas id="timelineChart"></canvas>
+                </div>
+            </div>
+        </div>
+
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
+            <div class="bg-gray-800 p-6 rounded-lg shadow">
+                <h2 class="text-xl font-semibold mb-4 text-green-400 flex items-center gap-2">
+                    <i data-lucide="disc"></i> Músicas Top
+                </h2>
+                <ul id="tracksList" class="space-y-2">
+                    <!-- Conteúdo dinâmico -->
+                    <li class="opacity-50 italic text-sm">Carregando músicas...</li>
+                </ul>
+            </div>
+            
+            <div class="bg-gray-800 p-6 rounded-lg shadow h-[400px] overflow-y-auto">
+                <h2 class="text-xl font-semibold mb-4 text-red-400 flex items-center gap-2">
+                    <i data-lucide="clock"></i> Feed de Atividade
+                </h2>
+                <div id="activityFeed" class="space-y-4">
+                    <!-- Conteúdo dinâmico -->
+                    <p class="opacity-50 italic text-sm">Carregando atividades...</p>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        lucide.createIcons();
+
+        // Initial empty charts
+        const chartOptions = {
+            indexAxis: 'y',
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+                x: { grid: { color: '#374151' }, ticks: { color: '#9ca3af' } },
+                y: { grid: { display: false }, ticks: { color: '#fff' } }
+            },
+            plugins: { legend: { display: false } }
+        };
+
+        const artistsChart = new Chart(document.getElementById('artistsChart'), {
+            type: 'bar',
+            data: { labels: [], datasets: [{ label: 'Plays', data: [], backgroundColor: '#3b82f6' }] },
+            options: chartOptions
+        });
+
+        const tagsChart = new Chart(document.getElementById('tagsChart'), {
+            type: 'bar',
+            data: { labels: [], datasets: [{ label: 'Peso', data: [], backgroundColor: '#a855f7' }] },
+            options: chartOptions
+        });
+
+        const timelineChart = new Chart(document.getElementById('timelineChart'), {
+            type: 'line',
+            data: { labels: [], datasets: [] },
+            options: { 
+                ...chartOptions, 
+                indexAxis: 'x', 
+                plugins: { 
+                    legend: { display: true, labels: { color: '#fff' } },
+                    tooltip: { mode: 'index', intersect: false }
+                },
+                scales: {
+                    x: { stacked: true, grid: { display: false }, ticks: { color: '#9ca3af' } },
+                    y: { stacked: true, grid: { color: '#374151' }, ticks: { color: '#9ca3af' } }
+                }
+            }
+        });
+
+        // Dynamic Loading Function
+        async function loadData() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const user = urlParams.get('user') || 'group';
+            const period = urlParams.get('period') || '7day';
+
+            try {
+                const response = await fetch(`/api/scrobble/data?user=${user}&period=${period}`);
+                const data = await response.json();
+
+                // Update Charts
+                artistsChart.data.labels = data.topArtists.map(a => a[0]);
+                artistsChart.data.datasets[0].data = data.topArtists.map(a => a[1]);
+                artistsChart.update();
+
+                // Update Stats Banner
+                const statsContainer = document.getElementById('dbStatsContainer');
+                const totalTracks = Object.values(data.dbStats).reduce((a, b) => a + b, 0);
+                
+                let statsHtml = `
+                    <div class="bg-blue-900/40 border border-blue-500/30 p-3 rounded-lg text-center">
+                        <span class="text-[10px] uppercase text-blue-400 font-bold block mb-1">Total Geral</span>
+                        <span class="text-xl font-bold font-mono">${totalTracks.toLocaleString()}</span>
+                    </div>
+                `;
+
+                Object.entries(data.dbStats).sort((a,b) => b[1] - a[1]).forEach(([user, count]) => {
+                    statsHtml += `
+                        <div class="bg-gray-800 border border-gray-700 p-3 rounded-lg text-center">
+                            <span class="text-[10px] uppercase text-gray-400 font-bold block mb-1">${user}</span>
+                            <span class="text-xl font-bold font-mono">${count.toLocaleString()}</span>
+                        </div>
+                    `;
+                });
+                statsContainer.innerHTML = statsHtml;
+
+                tagsChart.data.labels = data.topTags.map(t => t[0]);
+                tagsChart.data.datasets[0].data = data.topTags.map(t => t[1]);
+                tagsChart.update();
+
+                // Update Timeline with "Waves"
+                const palette = [
+                    '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', 
+                    '#ec4899', '#06b6d4', '#14b8a6', '#f43f5e', '#a855f7', 
+                    '#fb923c', '#2dd4bf', '#84cc16', '#6366f1', '#d946ef'
+                ];
+                timelineChart.data.labels = data.timelineData.labels || [];
+                
+                const wavesData = data.timelineData.wavesData || {};
+                
+                timelineChart.data.datasets = Object.entries(wavesData).map(([genre, dataset], i) => ({
+                    label: genre,
+                    data: dataset,
+                    borderColor: palette[i % palette.length],
+                    backgroundColor: palette[i % palette.length] + '99', 
+                    fill: 'origin',
+                    tension: 0.4,
+                    pointRadius: 0
+                }));
+                timelineChart.update();
+
+                // Update Tracks List
+                const tracksList = document.getElementById('tracksList');
+                tracksList.innerHTML = (data.topTracks || []).map(([name, count], i) => `
+                    <li class="flex justify-between border-b border-gray-700 py-2">
+                        <span class="text-sm font-medium">${i+1}. ${name}</span>
+                        <span class="text-xs text-gray-400">${count} plays</span>
+                    </li>
+                `).join('');
+
+                // Update Activity Feed
+                const activityFeed = document.getElementById('activityFeed');
+                const recentActivities = data.recentActivity || {};
+                activityFeed.innerHTML = Object.entries(recentActivities).map(([friend, recent]) => {
+                    if (!recent || recent.length === 0) return '';
+                    const track = recent[0];
+                    const artistName = track.artist ? (track.artist.name || track.artist['#text']) : 'Desconhecido';
+                    const trackName = track.name || 'Desconhecida';
+                    
+                    return `
+                        <div class="bg-gray-700/50 p-3 rounded">
+                            <span class="font-bold text-blue-300 text-xs">${friend}</span>
+                            <p class="text-sm">${artistName} - ${trackName}</p>
+                            <span class="text-[10px] text-gray-500 italic uppercase tracking-tighter">Último scrobble</span>
+                        </div>
+                    `;
+                }).join('');
+
+            } catch (err) {
+                console.error('Fetch error:', err);
+            }
+        }
+
+        // Run on load
+        loadData();
+        
+        // Auto-refresh every 30 seconds
+        setInterval(loadData, 30000);
+    </script>
+

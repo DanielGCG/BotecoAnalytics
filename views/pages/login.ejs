@@ -1,0 +1,70 @@
+<div class="flex items-center justify-center flex-grow p-6">
+    <div class="bg-gray-800 p-8 rounded-2xl shadow-2xl w-full max-w-md border border-gray-700">
+        <div class="text-center mb-8">
+            <img src="/BotecoAnalytics.webp" alt="Boteco Analytics" class="w-auto h-32 mx-auto mb-4 bg-white rounded-xl shadow-lg shadow-blue-500/20 object-contain">
+            <p class="text-gray-400 text-sm">Entre com sua conta do Teco para acessar o painel</p>
+        </div>
+
+        <% if (error) { %>
+            <div class="bg-red-500/10 border border-red-500 text-red-500 p-3 rounded-lg text-sm mb-6 text-center">
+                <%= error %>
+            </div>
+        <% } %>
+
+        <form action="/login" method="POST" class="space-y-6">
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">Usuário</label>
+                <div class="relative">
+                    <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">
+                        <i data-lucide="user" class="w-5 h-5"></i>
+                    </span>
+                    <input type="text" name="username" id="username" required
+                        class="w-full bg-gray-900 border border-gray-600 rounded-lg py-3 pl-10 pr-4 focus:outline-none focus:border-blue-500 transition-colors"
+                        placeholder="Seu nick no Teco">
+                </div>
+            </div>
+
+            <div>
+                <label class="block text-xs font-bold uppercase tracking-wider text-gray-400 mb-2">Senha</label>
+                <div class="relative">
+                    <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">
+                        <i data-lucide="lock" class="w-5 h-5"></i>
+                    </span>
+                    <input type="password" name="password" required
+                        class="w-full bg-gray-900 border border-gray-600 rounded-lg py-3 pl-10 pr-4 focus:outline-none focus:border-blue-500 transition-colors"
+                        placeholder="Sua senha">
+                </div>
+            </div>
+
+            <button type="submit" 
+                class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 rounded-lg transition-all transform active:scale-95 shadow-lg shadow-blue-600/20">
+                Acessar Painel
+            </button>
+        </form>
+
+        <p class="mt-8 text-center text-xs text-gray-500">
+            Apenas pessoal autorizado.
+        </p>
+    </div>
+</div>
+
+<script>
+    // Auto-formatação do username no front-end
+    const usernameInput = document.getElementById('username');
+    if (usernameInput) {
+        usernameInput.addEventListener('blur', function() {
+            let val = this.value.trim();
+            if (val && !val.startsWith('@')) {
+                this.value = '@' + val;
+            }
+        });
+        
+        // Também garante no envio do form
+        usernameInput.closest('form').addEventListener('submit', function() {
+            let val = usernameInput.value.trim();
+            if (val && !val.startsWith('@')) {
+                usernameInput.value = '@' + val;
+            }
+        });
+    }
+</script>

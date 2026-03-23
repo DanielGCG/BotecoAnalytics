@@ -1,0 +1,28 @@
+﻿<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%- typeof title != 'undefined' ? title : 'Boteco Analytics' %></title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <%- typeof head != 'undefined' ? head : '' %>
+</head>
+<body class="bg-gray-900 text-white min-h-screen flex flex-col">
+    <main class="flex-grow flex flex-col">
+        <%- body %>
+    </main>
+
+    <!-- Rodapé Global do Hub -->
+    <footer class="py-6 mt-auto text-center text-gray-600 text-xs flex items-center justify-center gap-2 border-t border-gray-800">
+        <i data-lucide="activity" class="w-4 h-4"></i>
+        Boteco Analytics • Grupo de análises de dados do Boteco do R$
+    </footer>
+
+    <script>
+        if (typeof lucide !== 'undefined') {
+            lucide.createIcons();
+        }
+    </script>
+</body>
+</html>

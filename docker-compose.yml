@@ -1,0 +1,47 @@
+services:
+  db:
+    image: mariadb:10.11
+    container_name: boteco-db
+    environment:
+      MARIADB_ROOT_PASSWORD: root
+      MARIADB_DATABASE: botecoanalytics
+    ports:
+      - "3307:3306"
+    volumes:
+      - ./mysql_data:/var/lib/mysql
+      - ./db/otherproject.sql:/docker-entrypoint-initdb.d/01-teco.sql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+  
+  app:
+    build: .
+    container_name: boteco-app
+    restart: always
+    ports:
+      - "3002:3002"
+    volumes:
+      - .:/app
+      - /app/node_modules
+    environment:
+      - DB_HOST=db
+      - DB_NAME=botecoanalytics
+      - DB_USER=root
+      - DB_PASS=root
+      - DB_HOST_TECO=${DB_HOST_TECO}
+      - DB_NAME_TECO=${DB_NAME_TECO}
+      - DB_USER_TECO=${DB_USER_TECO}
+      - DB_PASS_TECO=${DB_PASS_TECO}
+      - PORT=3002
+      # Adicione suas chaves do LastFM aqui ou em um arquivo .env separado
+      - LASTFM_API_KEY=${LASTFM_API_KEY}
+      - LASTFM_SECRET=${LASTFM_API_SECRET}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      db:
+        condition: service_healthy
+
+# O volume nomeado foi removido em favor do bind mount (./mysql_data) para facilitar backups em produção

@@ -1,0 +1,16 @@
+{
+  "development": {
+    "username": "root",
+    "password": "root",
+    "database": "botecoanalytics",
+    "host": "db",
+    "dialect": "mariadb"
+  },
+  "production": {
+    "username": "root",
+    "password": "root",
+    "database": "botecoanalytics",
+    "host": "db",
+    "dialect": "mariadb"
+  }
+}
