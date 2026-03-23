@@ -11,11 +11,6 @@ services:
       - ./mysql_data:/var/lib/mysql
       - ./db/init.sql:/docker-entrypoint-initdb.d/00-init.sql
       - ./db/otherproject.sql:/docker-entrypoint-initdb.d/01-teco.sql
-    healthcheck:
-      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
   
   app:
     build: .
@@ -42,7 +37,6 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     depends_on:
-      db:
-        condition: service_healthy
+      - db
 
 # O volume nomeado foi removido em favor do bind mount (./mysql_data) para facilitar backups em produção
