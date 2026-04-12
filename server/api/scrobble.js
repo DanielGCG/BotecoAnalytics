@@ -201,7 +201,7 @@ router.options('/widget/:user', (req, res) => {
     res.header("Access-Control-Allow-Origin", "*");
     res.header("Access-Control-Allow-Methods", "GET, OPTIONS");
     res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
-    res.send(200);
+    res.sendStatus(200);
 });
 
 router.get('/widget/:user', async (req, res) => {

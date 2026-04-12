@@ -1,15 +1,14 @@
 const express = require('express');
+const scrobbleRouter = require('./scrobble');
 require('dotenv').config();
 
 const router = express.Router();
 
-router.use('/scrobble', require('./scrobble'));
+// Aplica roteamento do scrobble no /scrobble
+router.use('/scrobble', scrobbleRouter);
 
-// Alias direto para o widget na raiz da api para facilitar a URL
-router.use('/widget', (req, res, next) => {
-    // Redireciona a chamada silenciosamente para o scrobble router 
-    req.url = '/widget' + req.url;
-    require('./scrobble')(req, res, next);
-});
+// Alias direto para as rotas de scrobble na raiz da API
+// Assim /api/widget/... passa a funcionar perfeitamente sem gambiarra de req.url
+router.use('/', scrobbleRouter);
 
 module.exports = router;
