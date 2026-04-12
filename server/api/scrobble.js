@@ -168,4 +168,127 @@ router.get('/data', async (req, res) => {
     }
 });
 
+const lastTrackCache = new Map();
+const weeklyTopTrackCache = new Map();
+const TTL_LAST_TRACK_MS = 15 * 1000; // 15 segundos para atualizar rápido o "now playing"
+const TTL_WEEKLY_TRACK_MS = 60 * 60 * 1000; // 1 hora para o top semanal
+
+// Função auxiliar para ignorar a imagem padrão de "estrela" do Last.fm e pegar a real
+async function getRealTrackImage(username, artist, trackName) {
+    try {
+        const response = await lastfm._request({
+            method: 'track.getInfo',
+            artist: artist,
+            track: trackName,
+            username: username,
+            api_key: process.env.LASTFM_API_KEY,
+            format: 'json'
+        });
+        const trackInfo = response?.data?.track;
+        if (trackInfo && trackInfo.album && trackInfo.album.image) {
+            const bestImage = trackInfo.album.image.find(img => img.size === 'extralarge' || img.size === 'large');
+            if (bestImage && bestImage['#text'] && !bestImage['#text'].includes('2a96cbd8b46e442fc41c2b86b821562f')) {
+                return bestImage['#text'];
+            }
+        }
+    } catch (e) {
+        console.error('Error fetching real track image:', e.message);
+    }
+    return null;
+}
+
+router.options('/widget/:user', (req, res) => {
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Methods", "GET, OPTIONS");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+    res.send(200);
+});
+
+router.get('/widget/:user', async (req, res) => {
+    // Habilita o CORS para que outro projeto possa consumir a API sem bloqueios
+    res.header("Access-Control-Allow-Origin", "*");
+    res.header("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept, Authorization");
+
+    const token = req.query.token || req.headers.authorization;
+    const expectedToken = process.env.WIDGET_TOKEN || 'sua_senha_secreta_aqui';
+
+    if (!token || (token !== expectedToken && token !== `Bearer ${expectedToken}`)) {
+        return res.status(401).json({ error: 'Acesso negado: Token ausente ou inválido.' });
+    }
+
+    const username = req.params.user;
+    
+    // Atualização Inteligente e Separada (Now Playing Rápido vs Top Semanal que Demora)
+    const now = Date.now();
+    let lastTrackData = lastTrackCache.get(username);
+    let weeklyTopData = weeklyTopTrackCache.get(username);
+
+    try {
+        if (!lastTrackData || now - lastTrackData.timestamp > TTL_LAST_TRACK_MS) {
+            const recentTracks = await lastfm.getRecentTracks(username, 1);
+            let lastTrack = null;
+            if (recentTracks && recentTracks.length > 0) {
+                const track = recentTracks[0];
+                const bestImage = track.image ? track.image.find(img => img.size === 'extralarge' || img.size === 'large') : null;
+                let imageUrl = bestImage ? bestImage['#text'] : null;
+
+                // Remover a capa de estrela padrão do LastFM em fallback
+                if (imageUrl && imageUrl.includes('2a96cbd8b46e442fc41c2b86b821562f')) {
+                    imageUrl = null; 
+                }
+
+                lastTrack = {
+                    name: track.name,
+                    artist: track.artist['#text'] || track.artist.name,
+                    album: track.album ? track.album['#text'] : '',
+                    image: imageUrl,
+                    isNowPlaying: track['@attr'] && track['@attr'].nowplaying === 'true'
+                };
+            }
+            lastTrackData = { timestamp: now, data: lastTrack };
+            lastTrackCache.set(username, lastTrackData);
+        }
+
+        if (!weeklyTopData || now - weeklyTopData.timestamp > TTL_WEEKLY_TRACK_MS) {
+            const topTracks = await lastfm.getTopTracks(username, '7day', 1);
+            let weeklyTopTrack = null;
+            if (topTracks && topTracks.length > 0) {
+                const track = topTracks[0];
+                let imageUrl = null;
+                
+                // O getTopTracks frequentemente não envia imagem real. Vamos obter detalhada:
+                const realImage = await getRealTrackImage(username, track.artist.name, track.name);
+                
+                if (realImage) {
+                    imageUrl = realImage;
+                } else {
+                    const fallbackImage = track.image ? track.image.find(img => img.size === 'extralarge' || img.size === 'large') : null;
+                    if (fallbackImage && fallbackImage['#text'] && !fallbackImage['#text'].includes('2a96cbd8b46e442fc41c2b86b821562f')) {
+                        imageUrl = fallbackImage['#text'];
+                    }
+                }
+
+                weeklyTopTrack = {
+                    name: track.name,
+                    artist: track.artist.name,
+                    playcount: track.playcount,
+                    image: imageUrl
+                };
+            }
+            weeklyTopData = { timestamp: now, data: weeklyTopTrack };
+            weeklyTopTrackCache.set(username, weeklyTopData);
+        }
+
+        return res.json({
+            user: username,
+            lastTrack: lastTrackData.data,
+            weeklyTopTrack: weeklyTopData.data
+        });
+
+    } catch (error) {
+        console.error('Widget API Error:', error);
+        return res.status(500).json({ error: 'Erro ao buscar os dados do widget.' });
+    }
+});
+
 module.exports = router;

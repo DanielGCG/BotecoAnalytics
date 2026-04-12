@@ -4,7 +4,7 @@ const { Session, User, Role } = require('../utils/db');
  * Middleware para validar a sessão do Teco
  * 1. Verifica se existe cookie de sessão
  * 2. Valida no banco se a sessão existe e não expirou
- * 3. Garante que o usuário logado tem cargo < 11
+ * 3. Garante que o usuário logado tem cargo <= 11
  */
 const authMiddleware = async (req, res, next) => {
     const sessionCookie = req.cookies.teco_sessid;

@@ -29,7 +29,7 @@ router.post('/login', async (req, res) => {
             return res.render('pages/login', { error: 'Usuário ou senha incorretos' });
         }
 
-        if (user.roleId >= 11) {
+        if (user.roleId > 11) {
             return res.render('pages/login', { error: 'Acesso negado: Cargo insuficiente' });
         }
 
@@ -58,7 +58,7 @@ router.post('/login', async (req, res) => {
     }
 });
 
-// A partir daqui, todas as rotas de páginas exigem estar logado no Teco e cargo < 11
+// A partir daqui, todas as rotas de páginas exigem estar logado no Teco e cargo <= 11
 router.use(authMiddleware);
 
 router.get('/', (req, res) => {

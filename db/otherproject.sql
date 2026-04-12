@@ -522,3 +522,16 @@ CREATE TABLE IF NOT EXISTS badgeuser (
     FOREIGN KEY (badgeId) REFERENCES badge(id) ON DELETE CASCADE,
     FOREIGN KEY (createdbyUserId) REFERENCES user(id) ON DELETE SET NULL
 );
+
+-- ==========================
+-- TABELA DE CONFIGURAÇÕES
+-- ==========================
+CREATE TABLE IF NOT EXISTS systemconfig (
+    id INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+    `key` VARCHAR(64) NOT NULL UNIQUE,
+    `value` TEXT NOT NULL,
+    description VARCHAR(255) NULL
+);
+
+INSERT INTO systemconfig (`key`, `value`, `description`) VALUES
+('marquee', 'Bem-vindo ao Site do Boteco!', 'Texto que aparece no letreiro do topo do site');

@@ -17,11 +17,11 @@ app.use(express.static(path.join(__dirname, 'public')));
 app.use(cookieParser());
 app.use(express.urlencoded({ extended: true }));
 
-// Rota do roteador principal de páginas
-app.use('/', require('./server/pages/router'));
-
 // Rota do roteador principal de api
 app.use('/api', require('./server/api/router'));
+
+// Rota do roteador principal de páginas
+app.use('/', require('./server/pages/router'));
 
 
 syncDb().then(() => {

@@ -6,7 +6,7 @@ const sequelize = new Sequelize(
     process.env.DB_USER || 'root',
     process.env.DB_PASS || 'root',
     {
-        host: process.env.DB_HOST || 'db',
+        host: process.env.DB_HOST || 'localhost',
         dialect: 'mysql',
         logging: false,
         define: {
@@ -22,7 +22,7 @@ const sequelizeTeco = new Sequelize(
     process.env.DB_USER_TECO || 'root',
     process.env.DB_PASS_TECO || 'root',
     {
-        host: process.env.DB_HOST_TECO || 'host.docker.internal',
+        host: process.env.DB_HOST_TECO || 'localhost',
         port: process.env.DB_PORT_TECO || 3306,
         dialect: 'mysql',
         logging: false
