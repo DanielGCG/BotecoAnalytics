@@ -1,5 +1,5 @@
 const axios = require('axios');
-const { Scrobble, ArtistGenre, sequelize } = require('./db');
+const { Scrobble, TrackGenre, sequelize } = require('./db');
 const { Op } = require('sequelize');
 require('dotenv').config();
 
@@ -10,6 +10,52 @@ const lastfm = {
   /**
    * Internal helper to handle Axios requests with retry logic
    */
+  _isSyncingGenres: false,
+
+  async syncMissingGenresCooldown() {
+    if (this._isSyncingGenres) return;
+    this._isSyncingGenres = true;
+
+    try {
+        const query = `
+            SELECT DISTINCT s.artist, s.track 
+            FROM sb_scrobbles s
+            LEFT JOIN sb_trackgenres g ON g.artist COLLATE utf8mb4_unicode_ci = s.artist COLLATE utf8mb4_unicode_ci 
+                                      AND g.track COLLATE utf8mb4_unicode_ci = s.track COLLATE utf8mb4_unicode_ci
+            WHERE g.id IS NULL
+            LIMIT 150
+        `;
+        // Utilizando o sequelize para rodar uma query crua eficiente
+        const [missing] = await sequelize.query(query);
+
+        if (missing.length > 0) {
+            console.log(`[Genre DB Sync] Identificadas faixas pendentes. Buscando ${missing.length} novos gêneros com concorrência...`);
+            
+            // Acelerar consulta agrupando promessas (lotes paralelos de 5 com pausas leves)
+            const chunkSize = 5;
+            for (let i = 0; i < missing.length; i += chunkSize) {
+                const chunk = missing.slice(i, i + chunkSize);
+                await Promise.all(chunk.map(row => this.getTrackPrimaryGenre(row.artist, row.track)));
+                await new Promise(r => setTimeout(r, 400)); // Dispara até 5 requests a cada ~400ms (respeita rate limit de forma mt + rápida)
+            }
+            
+            console.log(`[Genre DB Sync] Lote de ${missing.length} faixas concluído.`);
+            
+            // Chama o próximo lote em apenas 1 segundo (antes eram 5)
+            setTimeout(() => {
+                this._isSyncingGenres = false;
+                this.syncMissingGenresCooldown();
+            }, 1000);
+        } else {
+            console.log(`[Genre DB Sync] 100% dos Scrobbles já possuem Cache de Gênero.`);
+            this._isSyncingGenres = false;
+        }
+    } catch (e) {
+        console.error(`[Genre DB Sync] Erro no worker:`, e.message);
+        this._isSyncingGenres = false;
+    }
+  },
+
   async _request(params, retries = 3) {
     for (let i = 0; i < retries; i++) {
         try {
@@ -201,42 +247,39 @@ const lastfm = {
   },
 
   /**
-   * Fetch top tags (genres) for a specific user based on their top artists.
+   * Fetch top tags (genres) for a specific user based on their top tracks in a period.
    */
   async getTopTags(user, period = '7day', limit = 10) {
     try {
-      const dbScrobbles = await Scrobble.findAll({
-        attributes: [
-            'artist',
-            [sequelize.fn('COUNT', sequelize.col('uts')), 'playcount']
-        ],
-        where: { user },
-        group: ['artist'],
-        order: [[sequelize.literal('playcount'), 'DESC']],
-        limit: 10
-      });
+      let whereClause = `user = :user`;
+      let replacements = { user };
 
-      const tagsMap = {};
-      
-      // Process the top artists from DB to get real tags
-      const artistsTagsData = await Promise.all(
-        dbScrobbles.map(a => this.getArtistPrimaryGenre(a.artist))
-      );
+      if (period !== 'overall') {
+          const daysMap = { '7day': 7, '1month': 30, '3month': 90, '6month': 180, '12month': 365 };
+          const days = daysMap[period] || 7;
+          const now = Math.floor(Date.now() / 1000);
+          whereClause += ` AND uts >= :fromUts`;
+          replacements.fromUts = now - (days * 24 * 60 * 60);
+      }
 
-      dbScrobbles.forEach((artist, index) => {
-        const genre = artistsTagsData[index];
-        const playcount = parseInt(artist.dataValues.playcount);
-        
-        if (genre !== 'Other') {
-          if (!tagsMap[genre]) tagsMap[genre] = 0;
-          tagsMap[genre] += playcount; 
-        }
-      });
+      const query = `
+          SELECT 
+              COALESCE(UPPER(g.genre), 'OUTROS') AS genre,
+              COUNT(*) AS playcount
+          FROM sb_scrobbles s
+          LEFT JOIN sb_trackgenres g 
+              ON s.artist COLLATE utf8mb4_unicode_ci = g.artist COLLATE utf8mb4_unicode_ci
+              AND s.track COLLATE utf8mb4_unicode_ci = g.track COLLATE utf8mb4_unicode_ci
+          WHERE s.${whereClause}
+          GROUP BY genre
+          ORDER BY playcount DESC
+          LIMIT :limit
+      `;
+      replacements.limit = limit;
 
-      return Object.entries(tagsMap)
-        .map(([name, count]) => ({ name, count }))
-        .sort((a, b) => b.count - a.count)
-        .slice(0, limit);
+      const [results] = await sequelize.query(query, { replacements });
+
+      return results.map(r => ({ name: r.genre, count: parseInt(r.playcount) }));
     } catch (error) {
       console.error(`Error fetching top tags for ${user}:`, error.message);
       return [];
@@ -264,13 +307,14 @@ const lastfm = {
   },
 
   /**
-   * Get real tags for an artist from Last.fm
+   * Get real tags for a track from Last.fm
    */
-  async getArtistTags(artist) {
+  async getTrackTags(artist, track) {
     try {
       const response = await this._request({
-          method: 'artist.gettoptags',
+          method: 'track.gettoptags',
           artist,
+          track,
           api_key: API_KEY,
           format: 'json'
       });
@@ -285,65 +329,118 @@ const lastfm = {
     }
   },
 
-  /**
-   * Get primary genre for an artist, using local DB as first-level cache
-   */
-  async getArtistPrimaryGenre(artistName) {
-    // 1. Check Local DB
-    const localEntry = await ArtistGenre.findByPk(artistName);
-    if (localEntry) return localEntry.genre;
-
-    // 2. Fetch from Last.fm if not found locally
-    // console.log(`[Genre] Fetching real tags for ${artistName}...`);
-    const tags = await this.getArtistTags(artistName);
-
-    // Whitelist for prioritization and normalization
+  _mapTagsToGenre(tags) {
     const genreWhitelist = {
-        'rock': 'Rock', 'classic rock': 'Rock', 'pop rock': 'Rock', 'indie rock': 'Indie', 'alternative rock': 'Indie', 'punk': 'Punk', 'hard rock': 'Rock', 'heavy metal': 'Metal', 'metal': 'Metal',
-        'k-pop': 'K-Pop', 'kpop': 'K-Pop', 'korean': 'K-Pop', 'j-pop': 'J-Pop', 'jpop': 'J-Pop', 'japanese': 'J-Pop',
-        'pop': 'Pop', 'dance-pop': 'Pop', 'synthpop': 'Pop',
-        'hip hop': 'Hip-Hop', 'rap': 'Hip-Hop', 'trap': 'Hip-Hop', 'r&b': 'R&B', 'soul': 'R&B', 
-        'mpb': 'MPB', 'brazilian': 'MPB', 'samba': 'MPB', 'bossa nova': 'MPB', 'sertanejo': 'Sertanejo',
-        'electronic': 'Electronic', 'house': 'Electronic', 'techno': 'Electronic', 'dance': 'Electronic', 'ambient': 'Electronic', 'lo-fi': 'Lo-Fi', 'lofi': 'Lo-Fi',
-        'jazz': 'Jazz', 'blues': 'Blues', 'country': 'Country', 'folk': 'Folk', 'indie': 'Indie', 'alternative': 'Indie',
-        'soundtrack': 'OST', 'ost': 'OST', 'score': 'OST', 'classical': 'Classical'
+        // 1. POP
+        'pop': 'POP', 'dance-pop': 'POP', 'synthpop': 'POP', 'electropop': 'POP', 'art pop': 'POP', 'hyperpop': 'POP', 'indie pop': 'POP', 'bedroom pop': 'POP', 'pop rock': 'POP', 'experimental pop': 'POP', 'dream pop': 'POP',
+        // 2. K-POP / J-POP (ASIA)
+        'k-pop': 'POP ASIÁTICO', 'kpop': 'POP ASIÁTICO', 'korean': 'POP ASIÁTICO', 'j-pop': 'POP ASIÁTICO', 'jpop': 'POP ASIÁTICO', 'japanese': 'POP ASIÁTICO', 'j-rock': 'POP ASIÁTICO', 'v-pop': 'POP ASIÁTICO',
+        // 3. ROCK
+        'rock': 'ROCK', 'alternative rock': 'ROCK', 'alt-rock': 'ROCK', 'indie rock': 'ROCK', 'classic rock': 'ROCK', 'hard rock': 'ROCK', 'grunge': 'ROCK', 'psychedelic rock': 'ROCK', 'soft rock': 'ROCK', 'glam rock': 'ROCK',
+        // 4. METAL
+        'metal': 'METAL', 'heavy metal': 'METAL', 'metalcore': 'METAL', 'death metal': 'METAL', 'black metal': 'METAL', 'thrash metal': 'METAL', 'nu metal': 'METAL', 'doom metal': 'METAL', 'power metal': 'METAL',
+        // 5. PUNK
+        'punk': 'PUNK', 'post-punk': 'PUNK', 'pop punk': 'PUNK', 'emo': 'PUNK', 'hardcore': 'PUNK', 'garage rock': 'PUNK',
+        // 6. MPB
+        'mpb': 'MPB', 'brazilian': 'MPB', 'nova mpb': 'MPB', 'tropicalia': 'MPB', 'bossa nova': 'MPB', 'manguebeat': 'MPB',
+        // 7. SAMBA / PAGODE
+        'samba': 'SAMBA / PAGODE', 'pagode': 'SAMBA / PAGODE',
+        // 8. SERTANEJO
+        'sertanejo': 'SERTANEJO', 'agronejo': 'SERTANEJO', 'sertanejo universitario': 'SERTANEJO',
+        // 9. FORRÓ
+        'forro': 'FORRÓ', 'forró': 'FORRÓ', 'piseiro': 'FORRÓ', 'baiao': 'FORRÓ', 'xote': 'FORRÓ',
+        // 10. FUNK
+        'funk carioca': 'FUNK', 'funk': 'FUNK', 'brega funk': 'FUNK', 'funk mtg': 'FUNK', 'funk paulista': 'FUNK',
+        // 11. RAP / HIP-HOP
+        'hip hop': 'RAP / HIP-HOP', 'rap': 'RAP / HIP-HOP', 'underground hip-hop': 'RAP / HIP-HOP', 'gangsta rap': 'RAP / HIP-HOP', 'boom bap': 'RAP / HIP-HOP',
+        // 12. TRAP / PHONK
+        'trap': 'TRAP / PHONK', 'phonk': 'TRAP / PHONK', 'drift phonk': 'TRAP / PHONK', 'brasilian trap': 'TRAP / PHONK',
+        // 13. R&B / SOUL
+        'r&b': 'R&B / SOUL', 'rnb': 'R&B / SOUL', 'soul': 'R&B / SOUL', 'neo-soul': 'R&B / SOUL', 'funk soul': 'R&B / SOUL',
+        // 14. LATIN
+        'reggaeton': 'LATIN', 'latin': 'LATIN', 'bachata': 'LATIN', 'urbano latino': 'LATIN', 'cumbia': 'LATIN', 'latin pop': 'LATIN', 'salsa': 'LATIN', 'merengue': 'LATIN',
+        // 15. ELETRÔNICA
+        'electronic': 'ELETRÔNICA', 'house': 'ELETRÔNICA', 'techno': 'ELETRÔNICA', 'dance': 'ELETRÔNICA', 'edm': 'ELETRÔNICA', 'dubstep': 'ELETRÔNICA', 'drum and bass': 'ELETRÔNICA', 'dnb': 'ELETRÔNICA', 'trance': 'ELETRÔNICA', 'synthwave': 'ELETRÔNICA', 'lo-fi': 'ELETRÔNICA', 'lofi': 'ELETRÔNICA', 'chillhop': 'ELETRÔNICA', 'ambient': 'ELETRÔNICA', 'trip-hop': 'ELETRÔNICA',
+        // 16. INDIE / ALTERNATIVE
+        'indie': 'INDIE / ALT', 'alternative': 'INDIE / ALT', 'indie folk': 'INDIE / ALT', 'shoegaze': 'INDIE / ALT', 'new wave': 'INDIE / ALT',
+        // 17. JAZZ / BLUES
+        'jazz': 'JAZZ / BLUES', 'blues': 'JAZZ / BLUES', 'fusion': 'JAZZ / BLUES', 'swing': 'JAZZ / BLUES',
+        // 18. COUNTRY / FOLK
+        'country': 'COUNTRY / FOLK', 'folk': 'COUNTRY / FOLK', 'bluegrass': 'COUNTRY / FOLK', 'americana': 'COUNTRY / FOLK',
+        // 19. CLÁSSICA / INSTRUMENTAL
+        'classical': 'CLÁSSICA / INST', 'classic': 'CLÁSSICA / INST', 'piano': 'CLÁSSICA / INST', 'instrumental': 'CLÁSSICA / INST', 'orchestra': 'CLÁSSICA / INST', 'opera': 'CLÁSSICA / INST',
+        // 20. SOUNDTRACKS / MUSICAL
+        'soundtrack': 'OST', 'ost': 'OST', 'score': 'OST', 'video game music': 'OST', 'vgm': 'OST', 'musical': 'MUSICAL', 'broadway': 'MUSICAL', 'show tunes': 'MUSICAL', 'west end': 'MUSICAL',
+        // REALOCAÇÃO (Estatísticos)
+        'reggae': 'LATIN', 'disco': 'POP', 'afrobeats': 'LATIN', 'afrobeat': 'LATIN', 'amapiano': 'ELETRÔNICA', 'ska': 'PUNK', 'dancehall': 'LATIN'
     };
 
-    let genre = 'Other';
+    let genre = null;
 
     if (tags && tags.length > 0) {
-        // Find the best match from the whitelist
+        // Primeira rodada: busca exata
         for (const tag of tags) {
             const tagName = (tag.name || tag['#text'] || '').toLowerCase();
             if (!tagName) continue;
 
-            // Try exact match or partial match
-            for (const [key, value] of Object.entries(genreWhitelist)) {
-                if (tagName === key || tagName === key.replace('-', ' ') || tagName.includes(key)) {
-                    genre = value;
-                    break;
-                }
+            if (genreWhitelist[tagName]) {
+                genre = genreWhitelist[tagName];
+                break;
             }
-            if (genre !== 'Other') break;
         }
+        
+        // Segunda rodada: busca por aproximação (includes)
+        if (!genre) {
+            for (const tag of tags) {
+                const tagName = (tag.name || tag['#text'] || '').toLowerCase();
+                if (!tagName) continue;
 
-        // Fallback: If no whitelist match, use the first tag if it's not in blacklist
-        if (genre === 'Other') {
-            const blacklist = ['seen live', 'favorites', 'awesome', 'cool', 'radio', 'under 2000', 'under 100', 'under 500', 'various artists', 'male vocalists', 'female vocalists'];
-            const firstValid = tags.find(t => {
-                const name = (t.name || t['#text'] || '').toLowerCase();
-                return name && !blacklist.some(b => name.includes(b));
-            });
-            if (firstValid) genre = firstValid.name || firstValid['#text'];
+                for (const [key, value] of Object.entries(genreWhitelist)) {
+                    if (tagName.includes(key) || tagName.includes(key.replace('-', ' '))) {
+                        genre = value;
+                        break;
+                    }
+                }
+                if (genre) break;
+            }
         }
     }
+    
+    // Se ainda for nulo, pegamos o gênero mais provável baseado em palavras-chave da primeira tag
+    if (!genre && tags && tags.length > 0) {
+        const firstTag = (tags[0].name || tags[0]['#text'] || '').toLowerCase();
+        if (firstTag.includes('pop')) return 'POP';
+        if (firstTag.includes('rock')) return 'ROCK';
+        if (firstTag.includes('metal')) return 'METAL';
+        if (firstTag.includes('rap') || firstTag.includes('hip hop')) return 'RAP / HIP-HOP';
+        if (firstTag.includes('electronic') || firstTag.includes('dance')) return 'ELETRÔNICA';
+        if (firstTag.includes('indie')) return 'INDIE / ALT';
+        if (firstTag.includes('brazilian') || firstTag.includes('brasil')) return 'MPB';
+    }
+
+    // Fallback final: Se não houver nenhuma pista, agrupamos em "OUTROS"
+    // Isso será usado apenas para o histórico temporal conforme solicitado
+    return genre || 'OUTROS';
+  },
+
+  /**
+   * Get primary genre for a track, using local DB as first-level cache
+   */
+  async getTrackPrimaryGenre(artistName, trackName) {
+    const trackId = `${artistName}:::${trackName}`;
+    
+    // 1. Check Local DB
+    const localEntry = await TrackGenre.findByPk(trackId);
+    if (localEntry) return localEntry.genre;
+
+    // 2. Fetch from Last.fm if not found locally
+    const tags = await this.getTrackTags(artistName, trackName);
+    let genre = this._mapTagsToGenre(tags);
 
     // 3. Save to local DB for next time
     try {
-        await ArtistGenre.upsert({ artist: artistName, genre });
-    } catch (e) {
-        // console.error("DB Save genre error", e.message);
-    }
+        await TrackGenre.upsert({ id: trackId, artist: artistName, track: trackName, genre });
+    } catch (e) {}
 
     return genre;
   },
@@ -367,6 +464,7 @@ const lastfm = {
 
     const timeline = {};
     const genreTimeline = {};
+    const artistTimeline = {};
     const groupKeyFn = (dateStr) => {
         if (!dateStr) return 'Unknown';
         const date = new Date(dateStr);
@@ -387,83 +485,54 @@ const lastfm = {
         return dateStr;
     };
 
-    // To get all genres, we need to check the DB for all artists in the tracks
-    const uniqueArtistsInPeriod = [...new Set(tracks.map(t => t.artist))];
+    // To get all genres, we need to check the DB for all tracks
+    const uniqueTracksInPeriod = [...new Set(tracks.map(t => `${t.artist}:::${t.track}`))];
     
     // Fetch all genres from DB at once if possible
-    const localGenres = await ArtistGenre.findAll({
-        where: { artist: { [Op.in]: uniqueArtistsInPeriod } }
+    const localGenres = await TrackGenre.findAll({
+        where: { id: { [Op.in]: uniqueTracksInPeriod } }
     });
     
-    const artistGenres = {};
-    localGenres.forEach(ag => {
-        artistGenres[ag.artist] = ag.genre;
+    const trackGenres = {};
+    localGenres.forEach(tg => {
+        trackGenres[tg.id] = tg.genre;
     });
 
-    // For any artist not in DB, we fetch it (this will also save to DB)
-    // We limit this to avoid spamming the API if many are missing
-    const missingArtists = uniqueArtistsInPeriod.filter(a => !artistGenres[a]);
-    const artistsToFetch = missingArtists.slice(0, 50); // Fetch up to 50 missing per request
+    // For any track not in DB, we fetch it (this will also save to DB)
+    // Limits the fetching massively so we don't spam 1000 requests per user
+    const missingTracks = uniqueTracksInPeriod.filter(id => !trackGenres[id]);
+    const tracksToFetch = missingTracks.slice(0, 50); // Fetch up to 50 missing per request
 
-    await Promise.all(artistsToFetch.map(async name => {
-        artistGenres[name] = await this.getArtistPrimaryGenre(name);
+    await Promise.all(tracksToFetch.map(async id => {
+        const [artist, track] = id.split(':::');
+        trackGenres[id] = await this.getTrackPrimaryGenre(artist, track);
     }));
 
     tracks.forEach(track => {
       const key = groupKeyFn(track.date_str);
-      const genre = artistGenres[track.artist] || 'Other';
+      const trackId = `${track.artist}:::${track.track}`;
+      const genre = trackGenres[trackId] || 'OUTROS';
+      const artist = track.artist || 'Unknown';
       
       if (!timeline[key]) {
         timeline[key] = 0;
         genreTimeline[key] = {};
+        artistTimeline[key] = {};
       }
       timeline[key]++;
       if (!genreTimeline[key][genre]) genreTimeline[key][genre] = 0;
       genreTimeline[key][genre]++;
+      if (!artistTimeline[key][artist]) artistTimeline[key][artist] = 0;
+      artistTimeline[key][artist]++;
     });
 
     const sortedKeys = Object.keys(timeline).sort();
     return {
       labels: sortedKeys,
       values: sortedKeys.map(k => timeline[k]),
-      genreData: genreTimeline
+      genreData: genreTimeline,
+      artistData: artistTimeline
     };
-  },
-
-  /**
-   * Fetch weekly track chart (for temporal analysis)
-   */
-  async getWeeklyTrackChart(user) {
-    try {
-      const response = await axios.get(BASE_URL, {
-        params: {
-          method: 'user.getweeklytrackchart',
-          user,
-          api_key: API_KEY,
-          format: 'json'
-        }
-      });
-      return response.data.weeklytrackchart ? response.data.weeklytrackchart.track : [];
-    } catch (error) {
-      console.error(`Error fetching weekly track chart for ${user}:`, error.message);
-      return [];
-    }
-  },
-
-  /**
-   * Aggregate data for a group or specific user with defined period.
-   */
-  async getAdvancedData(users = [], period = '7day') {
-    const results = {};
-    for (const user of users) {
-      const [artists, tracks, tags] = await Promise.all([
-        this.getTopArtists(user, period, 10),
-        this.getTopTracks(user, period, 10),
-        this.getTopTags(user, period, 10)
-      ]);
-      results[user] = { artists, tracks, tags };
-    }
-    return results;
   }
 };
 

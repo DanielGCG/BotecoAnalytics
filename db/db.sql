@@ -11,11 +11,13 @@ CREATE TABLE IF NOT EXISTS `sb_scrobbles` (
   INDEX `sb_scrobbles_date_str` (`date_str`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Criação da tabela de Gêneros de Artistas
-CREATE TABLE IF NOT EXISTS `sb_artistgenres` (
+-- Criação da tabela de Gêneros de Faixas da nova feature
+CREATE TABLE IF NOT EXISTS `sb_trackgenres` (
+  `id` VARCHAR(500) NOT NULL,
   `artist` VARCHAR(255) NOT NULL,
+  `track` VARCHAR(255) NOT NULL,
   `genre` VARCHAR(255) NOT NULL,
   `createdAt` DATETIME NOT NULL,
   `updatedAt` DATETIME NOT NULL,
-  PRIMARY KEY (`artist`)
+  PRIMARY KEY (`id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

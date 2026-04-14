@@ -3,165 +3,279 @@ const lastfm = require('../utils/lastfm');
 const { Scrobble, sequelize, getValidLastFmUsers, cleanupOrphanedScrobbles } = require('../utils/db');
 const router = express.Router();
 
+// Cache em memória para requisições de dashboard (acelera auto-refresh e navegações curtas)
+const dashboardCache = new Map();
+const DASHBOARD_CACHE_TTL = 20 * 1000; // 20 segundos
+
 router.get('/data', async (req, res) => {
     try {
         const friends = await getValidLastFmUsers();
         
-        // Limpeza de scrobbles em background (não bloqueia a requisição)
+        // Background workers (disparam síncrono mas não bloqueiam a API)
         cleanupOrphanedScrobbles(friends);
+        lastfm.syncMissingGenresCooldown();
 
-        console.log(`[API] Solicitando dados para usuários do LastFM: ${friends.length > 0 ? friends.join(', ') : 'Nenhum'}`);
-
-        const filterUser = req.query.user || 'group';
-        
-        // Se solicitou um usuário específico que não é válido, interrompe
-        if (filterUser !== 'group' && !friends.includes(filterUser)) {
-            return res.json({
-                error: 'Usuário não encontrado ou não tem a conta LastFM associada.'
-            });
-        }
-
+        const queryUsers = req.query.user ? (Array.isArray(req.query.user) ? req.query.user : req.query.user.split(',')) : ['group'];
+        const isGroup = queryUsers.length === 1 && queryUsers[0] === 'group';
         const period = req.query.period || '7day';
 
-        const usersToFetch = filterUser === 'group' ? friends : [filterUser];
+        // Check Cache ANTES de ir no banco
+        const cacheKey = `dash_${queryUsers.sort().join('-')}_${period}`;
+        const cached = dashboardCache.get(cacheKey);
         
-        // Garante que a sincronização ocorra para os usuários solicitados
-        await Promise.all(usersToFetch.map(user => {
-             console.log(`[API] Disparando sincronização em background para: ${user}`);
-             return lastfm.syncUserScrobbles(user).catch(e => console.error(`[Sync Error] ${user}:`, e));
-        }));
+        if (cached && Date.now() - cached.timestamp < DASHBOARD_CACHE_TTL) {
+            return res.json(cached.data);
+        }
 
-        // Fetch DB Stats
-        const dbStats = await Scrobble.findAll({
-            attributes: [
-                'user',
-                [sequelize.fn('COUNT', sequelize.col('uts')), 'total']
-            ],
-            group: ['user'],
-            raw: true
+        console.log(`[API] Solicitando dados p/ processamento (Cache Miss): ${friends.length > 0 ? friends.join(', ') : 'Nenhum'}`);
+
+        // Verifica se os usuários existem (se não formos um grupo)
+        if (!isGroup) {
+            for (const u of queryUsers) {
+                if (!friends.includes(u)) {
+                    return res.json({
+                        error: `Usuário ${u} não encontrado ou não tem conta associada.`
+                    });
+                }
+            }
+        }
+
+        // usesToFetch identifica quem vamos processar
+        const usersToFetch = isGroup ? friends : queryUsers;
+        
+        // Garante que a sincronização ocorra em background (sem aguardar o await aqui)
+        usersToFetch.forEach(user => {
+             lastfm.syncUserScrobbles(user).catch(e => console.error(`[Sync Error] ${user}:`, e));
         });
+
+        // Fetch DB Stats e Background Stats em paralelo
+        const [dbStats, totalTracksResult, totalGenres] = await Promise.all([
+            Scrobble.findAll({
+                attributes: ['user', [sequelize.fn('COUNT', sequelize.col('uts')), 'total']],
+                group: ['user'],
+                raw: true
+            }),
+            sequelize.query(`SELECT COUNT(DISTINCT artist, track) as total FROM sb_scrobbles`),
+            (async () => {
+                try {
+                    const { TrackGenre } = require('../utils/db');
+                    return await TrackGenre.count();
+                } catch (e) { return 0; }
+            })()
+        ]);
 
         const statsMap = {};
         dbStats.forEach(s => statsMap[s.user] = s.total);
 
+        const totalUniqueTracks = totalTracksResult[0] && totalTracksResult[0][0] && totalTracksResult[0][0].total ? parseInt(totalTracksResult[0][0].total) : 0;
+        
         const rawData = {};
-        await Promise.all(usersToFetch.map(async (user) => {
-            const [artists, tracks, tags] = await Promise.all([
-                lastfm.getTopArtists(user, period, 10),
-                lastfm.getTopTracks(user, period, 10),
-                lastfm.getTopTags(user, period, 10)
-            ]);
-            rawData[user] = { artists, tracks, tags };
-        }));
-
         const recentActivity = {};
-        await Promise.all(friends.map(async friend => {
-            recentActivity[friend] = await lastfm.getRecentTracks(friend, 1);
-        }));
+        
+        // Fetch de dados de artistas/tracks/tags e atividade recente em paralelo
+        await Promise.all([
+            ...usersToFetch.map(async (user) => {
+                const [artists, tracks, tags] = await Promise.all([
+                    lastfm.getTopArtists(user, period, 20),
+                    lastfm.getTopTracks(user, period, 20),
+                    lastfm.getTopTags(user, period, 100)
+                ]);
+                rawData[user] = { artists, tracks, tags };
+            }),
+            ...friends.map(async friend => {
+                recentActivity[friend] = await lastfm.getRecentTracks(friend, 1);
+            })
+        ]);
 
         const aggregated = { artists: {}, tracks: {}, tags: {} };
         for (const user in rawData) {
-            if (rawData[user].artists) {
-                rawData[user].artists.forEach(a => {
-                    if (!aggregated.artists[a.name]) aggregated.artists[a.name] = 0;
-                    aggregated.artists[a.name] += parseInt(a.playcount || 0);
-                });
-            }
-            if (rawData[user].tracks) {
-                rawData[user].tracks.forEach(t => {
-                    const trackKey = `${t.artist.name} - ${t.name}`;
-                    if (!aggregated.tracks[trackKey]) aggregated.tracks[trackKey] = 0;
-                    aggregated.tracks[trackKey] += parseInt(t.playcount || 0);
-                });
-            }
-            if (rawData[user].tags) {
-                rawData[user].tags.forEach(g => {
-                    if (!aggregated.tags[g.name]) aggregated.tags[g.name] = 0;
-                    aggregated.tags[g.name] += parseInt(g.count || 0);
-                });
-            }
+            const artists = Array.isArray(rawData[user].artists) ? rawData[user].artists : [];
+            artists.forEach(a => {
+                if (!aggregated.artists[a.name]) aggregated.artists[a.name] = 0;
+                aggregated.artists[a.name] += parseInt(a.playcount || 0);
+            });
+            
+            const tracks = Array.isArray(rawData[user].tracks) ? rawData[user].tracks : [];
+            tracks.forEach(t => {
+                const trackKey = `${t.artist.name} - ${t.name}`;
+                if (!aggregated.tracks[trackKey]) aggregated.tracks[trackKey] = 0;
+                aggregated.tracks[trackKey] += parseInt(t.playcount || 0);
+            });
+
+            const tags = Array.isArray(rawData[user].tags) ? rawData[user].tags : [];
+            tags.forEach(g => {
+                if (!aggregated.tags[g.name]) aggregated.tags[g.name] = 0;
+                aggregated.tags[g.name] += parseInt(g.count || 0);
+            });
         }
 
-        const sortAndSlice = (obj) => Object.entries(obj)
+        const sortAndSlice = (obj, limit = 20) => Object.entries(obj)
             .sort((a, b) => b[1] - a[1])
-            .slice(0, 10);
+            .slice(0, limit);
+
+        // Formata os dados brutos individuais para enviar ao frontend
+        const individualStats = {};
+        for (const user in rawData) {
+            individualStats[user] = {
+                artists: rawData[user].artists ? (Array.isArray(rawData[user].artists) ? rawData[user].artists.map(a => [a.name, parseInt(a.playcount || 0)]) : []) : [],
+                tracks: rawData[user].tracks ? (Array.isArray(rawData[user].tracks) ? rawData[user].tracks.map(t => [`${t.artist.name} - ${t.name}`, parseInt(t.playcount || 0)]) : []) : [],
+                tags: rawData[user].tags ? (Array.isArray(rawData[user].tags) ? rawData[user].tags.map(g => [g.name, parseInt(g.count || 0)]) : []) : []
+            };
+            
+            // Sort and slice each one
+            individualStats[user].artists = individualStats[user].artists.sort((a,b) => b[1]-a[1]).slice(0, 20);
+            individualStats[user].tracks = individualStats[user].tracks.sort((a,b) => b[1]-a[1]).slice(0, 20);
+            individualStats[user].tags = individualStats[user].tags.sort((a,b) => b[1]-a[1]).slice(0, 20);
+        }
 
         const timelineResults = await Promise.all(usersToFetch.map(u => {
-            const days = period === '1month' ? 30 : 
-                         period === '6month' ? 180 : 
-                         period === '12month' ? 365 :
-                         period === 'overall' ? 'overall' : 7;
+            const days = period === '7day' ? 7 : period === '1month' ? 30 : period === '3month' ? 90 : period === '6month' ? 180 : period === '12month' ? 365 : period === 'overall' ? 'overall' : 7;
             return lastfm.getTemporalData(u, days);
         }));
 
         if (timelineResults.length === 0 || !timelineResults[0]) {
-            return res.json({
-                dbStats: statsMap,
-                aggregated: { artists: [], tracks: [], tags: [] },
-                recentActivity: {},
-                timeline: { labels: [], datasets: [] },
-                genres: { labels: [], datasets: [] }
-            });
+            return res.json({ labels: [], values: [], datasets: {} });
         }
 
         const labels = timelineResults[0].labels;
         const totalTimelineValues = labels.map((_, i) => timelineResults.reduce((sum, res) => sum + (res.values[i] || 0), 0));
-
-        // Aggregate genre data across all users per date label
         const aggregatedGenreData = {};
-        const genreOverallTotals = {};
+        const aggregatedArtistData = {};
+        const artistOverallTotals = {};
+        const userLinesData = {};
 
-        labels.forEach(date => {
-            aggregatedGenreData[date] = {};
-            timelineResults.forEach(res => {
-                const dayData = res.genreData[date] || {};
-                Object.entries(dayData).forEach(([genre, count]) => {
-                    aggregatedGenreData[date][genre] = (aggregatedGenreData[date][genre] || 0) + count;
-                    genreOverallTotals[genre] = (genreOverallTotals[genre] || 0) + count;
-                });
+        usersToFetch.forEach(u => userLinesData[u] = new Array(labels.length).fill(0));
+
+        labels.forEach((date, i) => {
+            if (!aggregatedGenreData[date]) aggregatedGenreData[date] = {};
+            if (!aggregatedArtistData[date]) aggregatedArtistData[date] = {};
+            timelineResults.forEach((res, userIdx) => {
+                const user = usersToFetch[userIdx];
+                if (userLinesData[user]) {
+                    userLinesData[user][i] = res.values[i] || 0;
+                }
+                const dayGenreData = res.genreTimeline ? res.genreTimeline[date] : (res.genreData ? res.genreData[date] : {});
+                if (dayGenreData) {
+                    Object.entries(dayGenreData).forEach(([genre, count]) => {
+                        aggregatedGenreData[date][genre] = (aggregatedGenreData[date][genre] || 0) + count;
+                    });
+                }
+                const dayArtistData = res.artistData ? res.artistData[date] : {};
+                if (dayArtistData) {
+                    Object.entries(dayArtistData).forEach(([artist, count]) => {
+                        aggregatedArtistData[date][artist] = (aggregatedArtistData[date][artist] || 0) + count;
+                        artistOverallTotals[artist] = (artistOverallTotals[artist] || 0) + count;
+                    });
+                }
             });
         });
-
-        // Limit to 9 main genres TOTAL across the entire chart + 'Outros'
-        const top9OverallGenres = Object.entries(genreOverallTotals)
-            .sort((a, b) => b[1] - a[1])
-            .slice(0, 9)
-            .map(([genre]) => genre);
+ // Define exact list of genres for the timeline (including the special OST and MUSICAL)
+        const timelineGenres = [
+            'POP', 'POP ASIÁTICO', 'ROCK', 'METAL', 'PUNK', 'MPB', 'SAMBA / PAGODE', 
+            'SERTANEJO', 'FORRÓ', 'FUNK', 'RAP / HIP-HOP', 'TRAP / PHONK', 
+            'R&B / SOUL', 'LATIN', 'ELETRÔNICA', 'INDIE / ALT', 'JAZZ / BLUES', 
+            'COUNTRY / FOLK', 'CLÁSSICA / INST', 'OST', 'MUSICAL', 'OUTROS'
+        ];
 
         const wavesData = {};
-        
-        // Initialize waves for top 9 and a collector for "Outros"
-        top9OverallGenres.forEach(genre => {
-            wavesData[genre] = labels.map(() => 0);
+        timelineGenres.forEach(genre => wavesData[genre] = labels.map(() => 0));
+
+        // For the Bar Chart (Gêneros Estilos), we show only the top 20 real categories
+        const finalAggregatedTags = Object.entries(aggregated.tags)
+            .filter(([name]) => name && name.toUpperCase() !== 'OUTROS' && name !== 'null' && name !== 'NULL' && name !== 'undefined')
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 20);
+
+        // O Top 10 artistas diários pode gerar muito mais que 10 artistas únicos na timeline
+        const topArtistsSet = new Set();
+        labels.forEach(date => {
+            const dayArtistData = aggregatedArtistData[date] || {};
+            const sortedDay = Object.entries(dayArtistData).sort((a, b) => b[1] - a[1]);
+            const top20ThisDay = sortedDay.slice(0, 20).map(([a]) => a);
+            top20ThisDay.forEach(a => topArtistsSet.add(a));
         });
-        wavesData['Outros'] = labels.map(() => 0);
+        
+        // Ordena a lista aglomerada pelos totais globais e limita (ex: máx 20 conforme solicitado)
+        const finalTopArtists = Array.from(topArtistsSet)
+            .sort((a, b) => (artistOverallTotals[b] || 0) - (artistOverallTotals[a] || 0))
+            .slice(0, 20);
+
+        const artistWavesData = {};
+        finalTopArtists.forEach(artist => artistWavesData[artist] = labels.map(() => 0));
 
         labels.forEach((date, dateIdx) => {
-            const dayData = aggregatedGenreData[date];
-            // Sort to find the top 7 for THIS day among all genres
-            const sortedDay = Object.entries(dayData).sort((a, b) => b[1] - a[1]);
-            const top7InDay = sortedDay.slice(0, 7).map(([g]) => g);
-
-            // For each genre that has data on this day
-            Object.entries(dayData).forEach(([genre, count]) => {
-                if (top7InDay.includes(genre) && top9OverallGenres.includes(genre)) {
-                    // It's a top 7 of the day AND a top 9 overall
+            const dayGenreData = aggregatedGenreData[date] || {};
+            
+            Object.entries(dayGenreData).forEach(([genre, count]) => {
+                if (timelineGenres.includes(genre)) {
                     wavesData[genre][dateIdx] = count;
                 } else {
-                    // Everything else goes to Outros to maintain the total area
-                    wavesData['Outros'][dateIdx] += count;
+                    // Fallback para a timeline apenas
+                    wavesData['OUTROS'][dateIdx] += count;
+                }
+            });
+
+            const dayArtistData = aggregatedArtistData[date] || {};
+            
+            Object.entries(dayArtistData).forEach(([artist, count]) => {
+                // Se o artista figura na elite da timeline de qualquer dia, ganha linha dedicada
+                if (finalTopArtists.includes(artist)) {
+                    artistWavesData[artist][dateIdx] = count;
                 }
             });
         });
 
-        res.json({
+        // Pre-format datasets for Chart.js to reduce frontend CPU usage
+        const genreDatasets = Object.entries(wavesData).map(([genre, data]) => ({
+            label: genre,
+            data,
+            fill: 'origin',
+            tension: 0.4,
+            pointRadius: 0
+        }));
+
+        const artistDatasets = Object.entries(artistWavesData).map(([artist, data]) => ({
+            label: artist,
+            data,
+            fill: false,
+            tension: 0.4,
+            pointRadius: 3
+        }));
+
+        const userDatasets = Object.entries(userLinesData).map(([user, data]) => ({
+            label: user,
+            data,
+            fill: false,
+            tension: 0.4,
+            pointRadius: 3
+        }));
+
+        const fullResponse = {
             topArtists: sortAndSlice(aggregated.artists),
             topTracks: sortAndSlice(aggregated.tracks),
-            topTags: sortAndSlice(aggregated.tags),
+            topTags: finalAggregatedTags, // Já está sorteado e fatiado
+            individualStats, // Dados para a ferramenta de comparação
             recentActivity,
-            timelineData: { labels, values: totalTimelineValues, wavesData },
-            dbStats: statsMap
-        });
+            timelineData: { 
+                labels, 
+                values: totalTimelineValues, 
+                datasets: {
+                    genre: genreDatasets,
+                    artist: artistDatasets,
+                    user: userDatasets
+                }
+            },
+            dbStats: statsMap,
+            processingStats: {
+                totalUniqueTracks,
+                totalGenres
+            }
+        };
+
+        // Salvar no Cache de Dashboard!
+        dashboardCache.set(cacheKey, { timestamp: Date.now(), data: fullResponse });
+
+        res.json(fullResponse);
     } catch (error) {
         console.error('API Error:', error);
         res.status(500).json({ error: 'Failed to fetch data' });

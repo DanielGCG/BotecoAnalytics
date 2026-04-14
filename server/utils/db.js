@@ -150,18 +150,26 @@ const Scrobble = sequelize.define('Scrobble', {
     ]
 });
 
-// Armazenar o gênero dos artistas localmente
-const ArtistGenre = sequelize.define('ArtistGenre', {
+// Armazenar o gênero das faixas localmente
+const TrackGenre = sequelize.define('TrackGenre', {
+    id: {
+        type: DataTypes.STRING(500),
+        primaryKey: true // Formato esperado: artist:::track
+    },
     artist: {
         type: DataTypes.STRING,
-        primaryKey: true
+        allowNull: false
+    },
+    track: {
+        type: DataTypes.STRING,
+        allowNull: false
     },
     genre: {
         type: DataTypes.STRING,
         allowNull: false
     }
 }, {
-    tableName: 'sb_artistgenres',
+    tableName: 'sb_trackgenres',
     timestamps: true
 });
 
@@ -222,4 +230,4 @@ const syncDb = async () => {
     }
 };
 
-module.exports = { sequelize, sequelizeTeco, Scrobble, ArtistGenre, User, Role, Session, syncDb, getValidLastFmUsers, cleanupOrphanedScrobbles };
+module.exports = { sequelize, sequelizeTeco, Scrobble, TrackGenre, User, Role, Session, syncDb, getValidLastFmUsers, cleanupOrphanedScrobbles };

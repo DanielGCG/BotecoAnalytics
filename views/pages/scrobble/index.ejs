@@ -3,75 +3,88 @@
 
 <%- contentFor('body') %>
 
-    <nav class="bg-gray-800 p-4 mb-8 shadow-md flex justify-between items-center px-8">
-        <div class="flex items-center gap-4">
-            <a href="/" class="hover:opacity-80 transition-opacity">
-                <img src="/BotecoAnalytics.webp" alt="Boteco Analytics" class="h-12 w-auto object-contain bg-white rounded">
+    <nav class="bg-gray-800 p-4 mb-8 shadow-md flex flex-col md:flex-row justify-between items-center px-4 md:px-8 gap-4">
+        <div class="flex items-center gap-4 w-full md:w-auto">
+            <a href="/" class="hover:opacity-80 transition-opacity flex-shrink-0">
+                <img src="/BotecoAnalytics.webp" alt="Boteco Analytics" class="h-10 md:h-12 w-auto object-contain bg-white rounded">
             </a>
             <div class="flex flex-col leading-tight border-l border-gray-600 pl-4">
-                <span class="text-xs uppercase tracking-widest text-gray-400 font-bold">Módulo</span>
-                <h1 class="text-lg font-bold text-blue-500 flex items-center gap-2">
+                <span class="text-[10px] md:text-xs uppercase tracking-widest text-gray-400 font-bold">Módulo</span>
+                <h1 class="text-base md:text-lg font-bold text-blue-500 flex items-center gap-2">
                     <i data-lucide="music" class="w-4 h-4"></i> Boteco Scrobble
                 </h1>
             </div>
         </div>
-        <form class="flex gap-4 items-center bg-gray-700 p-2 rounded-lg" action="/scrobble" method="GET">
-            <select name="user" class="bg-gray-800 text-sm p-1 rounded border border-gray-600">
-                <option value="group" <%= filterUser === 'group' ? 'selected' : '' %>>Grupo Inteiro</option>
-                <% friends.forEach(f => { %>
-                    <option value="<%= f %>" <%= filterUser === f ? 'selected' : '' %>><%= f %></option>
-                <% }) %>
-            </select>
-            <select name="period" class="bg-gray-800 text-sm p-1 rounded border border-gray-600">
-                <option value="7day" <%= period === '7day' ? 'selected' : '' %>>Semana</option>
-                <option value="1month" <%= period === '1month' ? 'selected' : '' %>>Mês</option>
-                <option value="6month" <%= period === '6month' ? 'selected' : '' %>>Semestre</option>
-                <option value="12month" <%= period === '12month' ? 'selected' : '' %>>Ano</option>
-                <option value="overall" <%= period === 'overall' ? 'selected' : '' %>>Tudo</option>
-            </select>
-            <button type="submit" class="bg-blue-600 hover:bg-blue-700 px-4 py-1 rounded text-sm font-bold transition">Filtrar</button>
+        <form id="filterForm" class="flex flex-wrap md:flex-nowrap gap-2 md:gap-4 items-center bg-gray-700 p-2 rounded-lg w-full md:w-auto justify-center md:justify-start">
+            <div class="flex flex-col w-full md:w-auto">
+                <label class="text-[10px] text-gray-400 uppercase font-bold mb-1 md:hidden">Usuários</label>
+                <select id="userSelect" name="user" multiple class="bg-gray-800 text-sm p-1 rounded border border-gray-600 min-w-[120px] md:min-w-[150px] overflow-hidden" size="3">
+                    <option value="group" <%= filterUsers.includes('group') ? 'selected' : '' %>>Grupo Inteiro</option>
+                    <% friends.forEach(f => { %>
+                        <option value="<%= f %>" <%= filterUsers.includes(f) ? 'selected' : '' %>><%= f %></option>
+                    <% }) %>
+                </select>
+            </div>
+            <div class="flex flex-col flex-1 md:flex-none">
+                <label class="text-[10px] text-gray-400 uppercase font-bold mb-1 md:hidden">Período</label>
+                <select name="period" class="bg-gray-800 text-sm p-2 md:p-1 rounded border border-gray-600 w-full">
+                    <option value="7day" <%= period === '7day' ? 'selected' : '' %>>Semana</option>
+                    <option value="1month" <%= period === '1month' ? 'selected' : '' %>>Mês</option>
+                    <option value="6month" <%= period === '6month' ? 'selected' : '' %>>Semestre</option>
+                    <option value="12month" <%= period === '12month' ? 'selected' : '' %>>Ano</option>
+                    <option value="overall" <%= period === 'overall' ? 'selected' : '' %>>Tudo</option>
+                </select>
+            </div>
+            <button type="submit" class="bg-blue-600 hover:bg-blue-700 px-6 py-2 md:py-1 rounded text-sm font-bold transition w-full md:w-auto self-end md:self-center">Filtrar</button>
         </form>
     </nav>
 
-    <div class="container mx-auto px-6 max-w-7xl">
+    <div class="container mx-auto px-4 md:px-6 max-w-7xl">
         
-        <div id="dbStatsContainer" class="mb-8 grid grid-cols-2 md:grid-cols-5 gap-4">
+        <div id="dbStatsContainer" class="mb-8 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-5 gap-3 md:gap-4">
             <!-- Status serão injetados aqui -->
         </div>
         
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8 h-[400px]">
-            <div class="bg-gray-800 p-6 rounded-lg shadow min-h-0">
-                <h2 class="text-xl font-semibold mb-4 text-blue-400 flex items-center gap-2">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-8 h-auto md:h-[600px]">
+            <div class="bg-gray-800 p-4 md:p-6 rounded-lg shadow min-h-0">
+                <h2 class="text-lg md:text-xl font-semibold mb-4 text-blue-400 flex items-center gap-2">
                     <i data-lucide="mic"></i> Artistas Mais Ouvidos
                 </h2>
-                <div class="relative h-64">
+                <div class="relative h-[400px] md:h-[500px]">
                     <canvas id="artistsChart"></canvas>
                 </div>
             </div>
-            <div class="bg-gray-800 p-6 rounded-lg shadow min-h-0">
-                <h2 class="text-xl font-semibold mb-4 text-purple-400 flex items-center gap-2">
+            <div class="bg-gray-800 p-4 md:p-6 rounded-lg shadow min-h-0">
+                <h2 class="text-lg md:text-xl font-semibold mb-4 text-purple-400 flex items-center gap-2">
                     <i data-lucide="tag"></i> Gêneros (Estilos)
                 </h2>
-                <div class="relative h-64">
+                <div class="relative h-[400px] md:h-[500px]">
                     <canvas id="tagsChart"></canvas>
                 </div>
             </div>
         </div>
 
         <div class="grid grid-cols-1 mb-8">
-            <div class="bg-gray-800 p-6 rounded-lg shadow">
-                <h2 class="text-xl font-semibold mb-4 text-yellow-400 flex items-center gap-2">
-                    <i data-lucide="trending-up"></i> Histórico Temporal de Scrobbles
-                </h2>
-                <div class="relative h-[450px]">
+            <div class="bg-gray-800 p-4 md:p-6 rounded-lg shadow">
+                <div class="flex flex-col lg:flex-row items-center justify-between mb-4 gap-4">
+                    <h2 class="text-lg md:text-xl font-semibold text-yellow-400 flex items-center gap-2">
+                        <i data-lucide="trending-up"></i> Histórico Temporal
+                    </h2>
+                    <div class="flex w-full lg:w-auto gap-1 bg-gray-700 p-1 rounded-lg overflow-x-auto whitespace-nowrap scrollbar-hide">
+                        <button id="btnTimelineGenre" class="timeline-toggle flex-1 lg:flex-none bg-gray-600 px-3 py-1.5 rounded text-xs md:text-sm text-white font-medium hover:bg-gray-500 transition">Gêneros</button>
+                        <button id="btnTimelineArtist" class="timeline-toggle flex-1 lg:flex-none px-3 py-1.5 rounded text-xs md:text-sm text-gray-400 font-medium hover:bg-gray-500 hover:text-white transition">Artistas</button>
+                        <button id="btnTimelineUser" class="timeline-toggle flex-1 lg:flex-none px-3 py-1.5 rounded text-xs md:text-sm text-gray-400 font-medium hover:bg-gray-500 hover:text-white transition">Comparativo</button>
+                    </div>
+                </div>
+                <div class="relative h-[300px] md:h-[450px]">
                     <canvas id="timelineChart"></canvas>
                 </div>
             </div>
         </div>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-8 mb-12">
-            <div class="bg-gray-800 p-6 rounded-lg shadow">
-                <h2 class="text-xl font-semibold mb-4 text-green-400 flex items-center gap-2">
+            <div class="bg-gray-800 p-4 md:p-6 rounded-lg shadow order-2 md:order-1">
+                <h2 class="text-lg md:text-xl font-semibold mb-4 text-green-400 flex items-center gap-2">
                     <i data-lucide="disc"></i> Músicas Top
                 </h2>
                 <ul id="tracksList" class="space-y-2">
@@ -80,14 +93,24 @@
                 </ul>
             </div>
             
-            <div class="bg-gray-800 p-6 rounded-lg shadow h-[400px] overflow-y-auto">
-                <h2 class="text-xl font-semibold mb-4 text-red-400 flex items-center gap-2">
+            <div class="bg-gray-800 p-4 md:p-6 rounded-lg shadow h-[400px] overflow-y-auto order-1 md:order-2">
+                <h2 class="text-lg md:text-xl font-semibold mb-4 text-red-400 flex items-center gap-2">
                     <i data-lucide="clock"></i> Feed de Atividade
                 </h2>
                 <div id="activityFeed" class="space-y-4">
                     <!-- Conteúdo dinâmico -->
                     <p class="opacity-50 italic text-sm">Carregando atividades...</p>
                 </div>
+            </div>
+        </div>
+
+        <!-- Comparativo de Perfis (exibido quando >1 usuário filtrado ou 'group') -->
+        <div id="comparisonContainer" class="bg-gray-800 p-6 rounded-lg shadow mb-12 hidden">
+            <h2 class="text-xl font-semibold mb-6 text-purple-400 flex items-center gap-2">
+                <i data-lucide="users"></i> Ferramenta Comparativa de Perfis
+            </h2>
+            <div id="comparisonGrid" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                <!-- Conteúdo dinâmico de comparação injetado aqui -->
             </div>
         </div>
 
@@ -102,8 +125,16 @@
             responsive: true,
             maintainAspectRatio: false,
             scales: {
-                x: { grid: { color: '#374151' }, ticks: { color: '#9ca3af' } },
-                y: { grid: { display: false }, ticks: { color: '#fff' } }
+                x: { 
+                    grid: { color: '#374151' }, 
+                    ticks: { color: '#9ca3af' },
+                    beginAtZero: true,
+                    suggestedMax: 10
+                },
+                y: { 
+                    grid: { display: false }, 
+                    ticks: { color: '#fff' } 
+                }
             },
             plugins: { legend: { display: false } }
         };
@@ -116,7 +147,7 @@
 
         const tagsChart = new Chart(document.getElementById('tagsChart'), {
             type: 'bar',
-            data: { labels: [], datasets: [{ label: 'Peso', data: [], backgroundColor: '#a855f7' }] },
+            data: { labels: [], datasets: [{ label: 'Plays', data: [], backgroundColor: '#a855f7' }] },
             options: chartOptions
         });
 
@@ -137,15 +168,72 @@
             }
         });
 
+        // Timeline view mode (genre | artist | user)
+        let timelineMode = 'genre';
+        let latestTimelineData = null;
+        let lastDataString = null; // Hash memory for skipping equal updates
+        
+        // Dictionary for consistent color coding of macro-genres (19 Categories - DIVERSOS Removed)
+        const genreColors = {
+            'POP': '#ec4899',           // Pink
+            'POP ASIÁTICO': '#f472b6',    // Light pink
+            'ROCK': '#ef4444',          // Red
+            'METAL': '#7f1d1d',         // Dark red
+            'PUNK': '#dc2626',          // Red / Orange
+            'MPB': '#10b981',           // Emerald green
+            'SAMBA / PAGODE': '#059669', // Dark green
+            'SERTANEJO': '#84cc16',     // Lime
+            'FORRÓ': '#fde047',         // Yellow
+            'FUNK': '#f43f5e',          // Rose
+            'RAP / HIP-HOP': '#8b5cf6', // Purple
+            'TRAP / PHONK': '#7c3aed',  // Dark purple
+            'R&B / SOUL': '#a855f7',    // Light purple
+            'LATIN': '#eab308',         // Yellow / Gold
+            'ELETRÔNICA': '#06b6d4',    // Cyan
+            'INDIE / ALT': '#f59e0b',   // Amber
+            'JAZZ / BLUES': '#6366f1',  // Indigo
+            'COUNTRY / FOLK': '#b45309',// Brown / Amber
+            'CLÁSSICA / INST': '#cbd5e1',// Gray
+            'OST': '#94a3b8',           // Blue Gray
+            'MUSICAL': '#f472b6',       // Light Pink
+            'OUTROS': '#4b5563'         // Dark Gray (fallback)
+        };
+
+        const palette = [
+            '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', 
+            '#ec4899', '#06b6d4', '#14b8a6', '#f43f5e', '#a855f7', 
+            '#fb923c', '#2dd4bf', '#84cc16', '#6366f1', '#d946ef', '#ef4444'
+        ];
+
         // Dynamic Loading Function
         async function loadData() {
             const urlParams = new URLSearchParams(window.location.search);
-            const user = urlParams.get('user') || 'group';
+            const userParams = urlParams.getAll('user');
+            // Extract the user string correctly whether array or single
+            let userQuery = '';
+            if (userParams.length > 0) {
+                userQuery = userParams.map(u => `user=${encodeURIComponent(u)}`).join('&');
+            } else {
+                userQuery = 'user=group';
+            }
             const period = urlParams.get('period') || '7day';
 
             try {
-                const response = await fetch(`/api/scrobble/data?user=${user}&period=${period}`);
+                // Determine if we're on a local or production environment to adjust the API URL if needed
+                // But generally relative paths work fine in Express.
+                const response = await fetch(`/api/scrobble/data?${userQuery}&period=${period}`);
+                if (!response.ok) {
+                    const errorText = await response.text();
+                    console.error('Server error response:', errorText);
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
                 const data = await response.json();
+
+                // Ignora atualização visual se os dados exatos do servidor não mudaram 
+                // Ex: Ninguém escutou música nova e o Worker de gêneros não pegou algo de diferente
+                const currentDataString = JSON.stringify(data);
+                if (lastDataString === currentDataString) return; 
+                lastDataString = currentDataString;
 
                 // Update Charts
                 artistsChart.data.labels = data.topArtists.map(a => a[0]);
@@ -155,48 +243,61 @@
                 // Update Stats Banner
                 const statsContainer = document.getElementById('dbStatsContainer');
                 const totalTracks = Object.values(data.dbStats).reduce((a, b) => a + b, 0);
+
+                const { totalUniqueTracks, totalGenres } = data.processingStats || { totalUniqueTracks: 0, totalGenres: 0 };
+                const pctCataloged = totalUniqueTracks > 0 ? Math.round((totalGenres / totalUniqueTracks) * 100) : 0;
                 
                 let statsHtml = `
-                    <div class="bg-blue-900/40 border border-blue-500/30 p-3 rounded-lg text-center">
-                        <span class="text-[10px] uppercase text-blue-400 font-bold block mb-1">Total Geral</span>
-                        <span class="text-xl font-bold font-mono">${totalTracks.toLocaleString()}</span>
+                    <div class="bg-blue-900/40 border border-blue-500/30 p-3 rounded-lg text-center flex flex-col justify-center">
+                        <span class="text-[10px] uppercase text-blue-400 font-bold block mb-1">Scrobbles (Geral)</span>
+                        <span class="text-xl font-bold font-mono leading-none">${totalTracks.toLocaleString()}</span>
+                    </div>
+                    <div class="bg-purple-900/40 border border-purple-500/30 p-3 rounded-lg text-center flex flex-col justify-center relative overflow-hidden">
+                        <div class="absolute bottom-0 left-0 h-1 bg-purple-500 rounded-b-lg" style="width: ${pctCataloged}%"></div>
+                        <span class="text-[10px] uppercase text-purple-400 font-bold block mb-1" title="Músicas Catalogadas c/ Gêneros / Músicas Diferentes">Mapeamento de Gêneros</span>
+                        <span class="text-xl font-bold font-mono leading-none">${totalGenres.toLocaleString()} <span class="text-sm text-gray-400">/ ${totalUniqueTracks.toLocaleString()}</span></span>
                     </div>
                 `;
 
-                Object.entries(data.dbStats).sort((a,b) => b[1] - a[1]).forEach(([user, count]) => {
-                    statsHtml += `
-                        <div class="bg-gray-800 border border-gray-700 p-3 rounded-lg text-center">
-                            <span class="text-[10px] uppercase text-gray-400 font-bold block mb-1">${user}</span>
-                            <span class="text-xl font-bold font-mono">${count.toLocaleString()}</span>
+                // Agrupa os usuários em um único Card de Ranking ou um Modal
+                const sortedUsers = Object.entries(data.dbStats).sort((a,b) => b[1] - a[1]);
+                const topUsers = sortedUsers.slice(0, 3);
+                const otherUsersCount = sortedUsers.length - 3;
+
+                statsHtml += `
+                    <div class="bg-gray-800 border border-gray-700 p-3 rounded-lg md:col-span-3 text-left overflow-hidden">
+                        <span class="text-[10px] uppercase text-gray-400 font-bold block mb-2 px-1 flex justify-between">
+                            <span>Membros Mais Ativos</span>
+                            <span class="text-[9px] text-gray-500">${sortedUsers.length} total</span>
+                        </span>
+                        <div class="flex flex-wrap gap-2 items-center">
+                            ${sortedUsers.slice(0, 5).map(([user, count], i) => `
+                                <div class="bg-gray-700/40 px-3 py-1 rounded-md flex items-center gap-2 border border-gray-600/50 hover:border-blue-500/50 transition-colors cursor-default" title="${user}: ${count.toLocaleString()} scrobbles">
+                                    <span class="text-[10px] font-bold ${i < 3 ? 'text-yellow-500' : 'text-gray-500'}">#${i+1}</span>
+                                    <span class="text-xs font-medium text-gray-200">${user}</span>
+                                    <span class="text-[10px] text-gray-500 font-mono">${(count > 1000 ? (count/1000).toFixed(1) + 'k' : count)}</span>
+                                </div>
+                            `).join('')}
+                            ${sortedUsers.length > 5 ? `
+                                <div class="text-[10px] text-blue-400/80 font-medium px-2 py-1 bg-blue-900/20 rounded border border-blue-500/20">
+                                    + ${sortedUsers.length - 5} outros
+                                </div>
+                            ` : ''}
                         </div>
-                    `;
-                });
+                    </div>
+                `;
                 statsContainer.innerHTML = statsHtml;
 
-                tagsChart.data.labels = data.topTags.map(t => t[0]);
-                tagsChart.data.datasets[0].data = data.topTags.map(t => t[1]);
+                tagsChart.data.labels = (data.topTags || []).map(t => t[0]);
+                tagsChart.data.datasets[0].data = (data.topTags || []).map(t => t[1]);                
+                tagsChart.data.datasets[0].backgroundColor = (data.topTags || []).map(t => {
+                    const label = String(t[0]).toUpperCase();
+                    return genreColors[label] || palette[Math.abs(label.length * 3) % palette.length];
+                });
                 tagsChart.update();
 
-                // Update Timeline with "Waves"
-                const palette = [
-                    '#3b82f6', '#ef4444', '#10b981', '#f59e0b', '#8b5cf6', 
-                    '#ec4899', '#06b6d4', '#14b8a6', '#f43f5e', '#a855f7', 
-                    '#fb923c', '#2dd4bf', '#84cc16', '#6366f1', '#d946ef'
-                ];
-                timelineChart.data.labels = data.timelineData.labels || [];
-                
-                const wavesData = data.timelineData.wavesData || {};
-                
-                timelineChart.data.datasets = Object.entries(wavesData).map(([genre, dataset], i) => ({
-                    label: genre,
-                    data: dataset,
-                    borderColor: palette[i % palette.length],
-                    backgroundColor: palette[i % palette.length] + '99', 
-                    fill: 'origin',
-                    tension: 0.4,
-                    pointRadius: 0
-                }));
-                timelineChart.update();
+                latestTimelineData = data.timelineData;
+                renderTimelineChart(timelineMode);
 
                 // Update Tracks List
                 const tracksList = document.getElementById('tracksList');
@@ -225,10 +326,85 @@
                     `;
                 }).join('');
 
+                // Renderizar a ferramenta de comparação (apresentar se houver múltiplas estatísticas com scrobbles na resposta)
+                const compContainer = document.getElementById('comparisonContainer');
+                const compGrid = document.getElementById('comparisonGrid');
+                if (data.individualStats && Object.keys(data.individualStats).length > 1) {
+                    compContainer.classList.remove('hidden');
+                    compGrid.innerHTML = Object.entries(data.individualStats).map(([user, stats]) => {
+                        const topArtList = (stats.artists || []).slice(0, 3).map((a, i) => `<li>${i+1}. ${a[0]} <span class="text-xs text-gray-500">(${a[1]})</span></li>`).join('');
+                        const topTrkList = (stats.tracks || []).slice(0, 3).map((t, i) => `<li>${i+1}. ${t[0]} <span class="text-xs text-gray-500">(${t[1]})</span></li>`).join('');
+                        const topGenList = (stats.tags || []).slice(0, 3).map((g, i) => `<li>${i+1}. ${g[0]} <span class="text-xs text-gray-500">(${g[1]})</span></li>`).join('');
+                        
+                        return `
+                        <div class="bg-gray-700 p-4 rounded-lg border border-gray-600">
+                            <h3 class="text-lg font-bold text-center text-blue-400 mb-4 border-b border-gray-600 pb-2">${user}</h3>
+                            <div class="space-y-4">
+                                <div><span class="text-xs uppercase text-gray-400 font-bold block mb-1">Top Artistas</span><ul class="text-sm space-y-1">${topArtList}</ul></div>
+                                <div><span class="text-xs uppercase text-gray-400 font-bold block mb-1">Top Músicas</span><ul class="text-sm space-y-1">${topTrkList}</ul></div>
+                                <div><span class="text-xs uppercase text-gray-400 font-bold block mb-1">Top Gêneros</span><ul class="text-sm space-y-1">${topGenList}</ul></div>
+                            </div>
+                        </div>`;
+                    }).join('');
+                } else {
+                    compContainer.classList.add('hidden');
+                    compGrid.innerHTML = '';
+                }
+
             } catch (err) {
                 console.error('Fetch error:', err);
             }
         }
+
+        function renderTimelineChart(mode) {
+            if (!latestTimelineData || !latestTimelineData.datasets) return;
+
+            timelineChart.data.labels = latestTimelineData.labels || [];
+            const isAreaStacked = (mode === 'genre');
+            const sourceDatasets = latestTimelineData.datasets[mode] || [];
+
+            timelineChart.data.datasets = sourceDatasets.map((ds, i) => {
+                const label = ds.label;
+                let color;
+                
+                if (mode === 'genre' && genreColors[label]) {
+                    color = genreColors[label];
+                } else {
+                    color = palette[i % palette.length];
+                }
+
+                return {
+                    ...ds,
+                    borderColor: color,
+                    backgroundColor: isAreaStacked ? (color + 'AA') : 'transparent',
+                    pointHoverRadius: 5
+                };
+            });
+
+            // update stack configuration based on mode
+            timelineChart.options.scales.y.stacked = isAreaStacked;
+            timelineChart.options.plugins.tooltip.mode = isAreaStacked ? 'index' : 'nearest';
+
+            timelineChart.update();
+        }
+
+        // Setup Timeline buttons
+        document.querySelectorAll('.timeline-toggle').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                document.querySelectorAll('.timeline-toggle').forEach(b => {
+                    b.classList.remove('bg-gray-600', 'text-white');
+                    b.classList.add('text-gray-400');
+                });
+                e.target.classList.remove('text-gray-400');
+                e.target.classList.add('bg-gray-600', 'text-white');
+
+                if (e.target.id === 'btnTimelineGenre') timelineMode = 'genre';
+                if (e.target.id === 'btnTimelineArtist') timelineMode = 'artist';
+                if (e.target.id === 'btnTimelineUser') timelineMode = 'user';
+                
+                renderTimelineChart(timelineMode);
+            });
+        });
 
         // Run on load
         loadData();

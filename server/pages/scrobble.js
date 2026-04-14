@@ -14,13 +14,13 @@ router.get('/', async (req, res) => {
     try {
         const friends = await getValidLastFmUsers();
         
-        const filterUser = req.query.user || 'group';
+        const filterUsers = req.query.user ? (Array.isArray(req.query.user) ? req.query.user : req.query.user.split(',')) : ['group'];
         const period = req.query.period || '7day';
 
         res.render('pages/scrobble/index', {
             title: 'Scrobble Analytics',
             friends,
-            filterUser,
+            filterUsers,
             period
         });
     } catch (error) {
